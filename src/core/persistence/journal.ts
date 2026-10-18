@@ -1310,6 +1310,7 @@ export function receiptFor(stored: WriteRequest, facts?: WriteHealthFacts, now =
   const state: Exclude<RequestState, 'deferred'> = stored.state === 'deferred' ? 'queued' : stored.state;
   const row = { ...stored, state };
   const outcome = row.outcome && 'private_rows_kept' in row.outcome && !ownerWidened() ? (({ private_rows_kept: _kept, ...rest }) => rest)(row.outcome) : row.outcome;
+  const publicErrorDetail = row.error_detail ? publicFailureDetail(row.error_detail) : undefined;
   return {
     ...(outcome ?? {}),
     ...(outcome ? { outcome } : {}),
@@ -1318,7 +1319,7 @@ export function receiptFor(stored: WriteRequest, facts?: WriteHealthFacts, now =
       ...(stored.deferred_import_from != null ? { pending_import: true } : {}) } } : {}),
     ...writeHealth(row, facts, now),
     ...(row.error_code ? { write_error: row.error_code } : {}),
-    ...(row.error_detail ? { write_error_detail: publicFailureDetail(row.error_detail) } : {}),
+    ...(publicErrorDetail ? { write_error_detail: publicErrorDetail } : {}),
     ...(row.blocked_reason ? { blocked_reason: row.blocked_reason } : {}),
     ...(row.compacted ? { compacted: true } : {}),
     created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(),
