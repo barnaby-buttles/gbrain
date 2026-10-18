@@ -1303,6 +1303,7 @@ export function receiptFor(stored: WriteRequest, facts?: WriteHealthFacts, now =
   // PR B: a deferred row reads as queued (every receipt reader, an older client's included, knows that state) plus `deferred`.
   const state: Exclude<RequestState, 'deferred'> = stored.state === 'deferred' ? 'queued' : stored.state;
   const row = { ...stored, state };
+  const publicErrorDetail = row.error_detail ? publicFailureDetail(row.error_detail) : undefined;
   return {
     ...(row.outcome ?? {}),
     ...(row.outcome ? { outcome: row.outcome } : {}),
@@ -1311,7 +1312,7 @@ export function receiptFor(stored: WriteRequest, facts?: WriteHealthFacts, now =
       ...(stored.deferred_import_from != null ? { pending_import: true } : {}) } } : {}),
     ...writeHealth(row, facts, now),
     ...(row.error_code ? { write_error: row.error_code } : {}),
-    ...(row.error_detail ? { write_error_detail: publicFailureDetail(row.error_detail) } : {}),
+    ...(publicErrorDetail ? { write_error_detail: publicErrorDetail } : {}),
     ...(row.blocked_reason ? { blocked_reason: row.blocked_reason } : {}),
     ...(row.compacted ? { compacted: true } : {}),
     created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(),

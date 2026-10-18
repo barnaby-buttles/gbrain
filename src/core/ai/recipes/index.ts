@@ -11,6 +11,7 @@ import { google } from './google.ts';
 import { anthropic } from './anthropic.ts';
 import { claudeCli } from './claude-cli.ts';
 import { ollama } from './ollama.ts';
+import { ollamaCloud } from './ollama-cloud.ts';
 import { openrouter } from './openrouter.ts';
 import { voyage } from './voyage.ts';
 import { litellmProxy } from './litellm-proxy.ts';
@@ -24,6 +25,8 @@ import { dashscope } from './dashscope.ts';
 import { dashscopeRerank } from './dashscope-rerank.ts';
 import { zhipu } from './zhipu.ts';
 import { azureOpenAI } from './azure-openai.ts';
+import { opencodeGo } from './opencode-go.ts';
+import { commandcode } from './commandcode.ts';
 import { llamaServerReranker } from './llama-server-reranker.ts';
 import { nan } from './nan.ts';
 import { moonshot } from './moonshot.ts';
@@ -38,6 +41,7 @@ const ALL: Recipe[] = [
   anthropic,
   claudeCli,
   ollama,
+  ollamaCloud,
   openrouter,
   voyage,
   litellmProxy,
@@ -52,6 +56,8 @@ const ALL: Recipe[] = [
   dashscopeRerank,
   zhipu,
   azureOpenAI,
+  opencodeGo,
+  commandcode,
   nan,
   moonshot,
   mistral,

@@ -298,7 +298,9 @@ function embeddingUsd(chars: number, model: string | undefined): number | null {
 /**
  * Deterministic per-item request id: a rerun after a crash replays the same
  * admission (and waits for it if still pending). An attempt that ended in a
- * terminal failure is not replayed forever; the next attempt gets a new id.
+ * terminal failure is not replayed forever; the next attempt gets a new id,
+ * and so does a committed put_page explicitly skipped as a no-op — other
+ * committed receipts remain stable replays.
  * An item's cursor is part of the id, so two items that write the same page at
  * the same revision (two facts of one page) never share one: the second item
  * of a run is admitted while the first is still pending, and reusing the
@@ -312,7 +314,9 @@ export async function repairRequestId(ctx: OperationContext, kind: RepairKind, i
       : ['repair-request-v1', kind, item.source_id, item.slug, revision, attempt]);
     const id = `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
     const prior = await getWriteRequest(ctx.engine, principal, id);
-    if (!prior || !isTerminal(prior) || prior.state === 'committed') return id;
+    const committedSkippedNoopPage = prior?.state === 'committed' && prior.operation === 'put_page'
+      && prior.outcome?.status === 'skipped' && prior.outcome?.noop === true;
+    if (!prior || !isTerminal(prior) || prior.state === 'committed' && !committedSkippedNoopPage) return id;
   }
 }
 

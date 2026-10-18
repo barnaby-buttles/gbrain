@@ -21,6 +21,9 @@ describe('mergedProviderEnv', () => {
       deepseek_api_key: 'sk-deepseek',
       google_api_key: 'gg',
       azure_openai_api_key: 'az-secret',
+      opencode_go_api_key: 'opencode-config',
+      commandcode_api_key: 'commandcode-config',
+      ollama_api_key: 'ollama-config',
       azure_openai_endpoint: 'https://x.openai.azure.com',
       azure_openai_deployment: 'gpt-5',
       azure_openai_use_entra: '1',
@@ -32,6 +35,9 @@ describe('mergedProviderEnv', () => {
     expect(env.DASHSCOPE_API_KEY).toBe('ds');
     expect(env.DEEPSEEK_API_KEY).toBe('sk-deepseek');
     expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBe('gg');
+    expect(env.OPENCODE_GO_API_KEY).toBe('opencode-config');
+    expect(env.COMMANDCODE_API_KEY).toBe('commandcode-config');
+    expect(env.OLLAMA_API_KEY).toBe('ollama-config');
     // #4031: the key was the only member of the Azure group left unfolded —
     // config.json looked complete while every keyless-shell embed failed auth.
     expect(env.AZURE_OPENAI_API_KEY).toBe('az-secret');
