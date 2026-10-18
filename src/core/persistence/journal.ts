@@ -1159,13 +1159,14 @@ export async function compactReceipt(engine: BrainEngine, row: Pick<WriteRequest
   });
 }
 export function receiptFor(row: WriteRequest, facts?: WriteHealthFacts, now = Date.now()) {
+  const publicErrorDetail = row.error_detail ? publicFailureDetail(row.error_detail) : undefined;
   return {
     ...(row.outcome ?? {}),
     ...(row.outcome ? { outcome: row.outcome } : {}),
     request_id: row.request_id, ...(row.client_request_id ? { client_request_id: row.client_request_id } : {}), state: row.state,
     ...writeHealth(row, facts, now),
     ...(row.error_code ? { write_error: row.error_code } : {}),
-    ...(row.error_detail ? { write_error_detail: publicFailureDetail(row.error_detail) } : {}),
+    ...(publicErrorDetail ? { write_error_detail: publicErrorDetail } : {}),
     ...(row.blocked_reason ? { blocked_reason: row.blocked_reason } : {}),
     ...(row.compacted ? { compacted: true } : {}),
     created_at: new Date(row.created_at).toISOString(), updated_at: new Date(row.updated_at).toISOString(),

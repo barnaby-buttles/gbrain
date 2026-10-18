@@ -191,6 +191,23 @@ describe('extractEntityRefs', () => {
     expect(wrongQualified.length).toBe(0);
   });
 
+  test('skips external URL syntax before parsing a qualified wikilink source id', () => {
+    expect(extractEntityRefs('[[https://audio.inleague.io/audio/file.mp3]]')).toEqual([]);
+  });
+
+  test('keeps valid qualified wikilinks but rejects slash-leading wikilinks', () => {
+    const refs = extractEntityRefs('[[wiki:concepts/page]]');
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ sourceId: 'wiki', slug: 'concepts/page' });
+    expect(extractEntityRefs('[[/concepts/page]]')).toEqual([]);
+  });
+
+  test('preserves single-slash root-relative markdown refs', () => {
+    const refs = extractEntityRefs('[Alice](/people/alice-example.md)');
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ name: 'Alice', slug: 'people/alice-example' });
+  });
+
   test('a wikilink inside a markdown-link label is inert (codex P2a)', () => {
     // `[see [[acme]]](companies/acme.md)` must NOT spawn a stray generic
     // basename ref for the inner `[[acme]]`. Pass-1 can't match the nested
@@ -266,6 +283,27 @@ describe('extractPageLinks', () => {
     expect(aliceLink!.linkType).toBe('mentions');
     const { candidates: employer } = await extractPageLinks('docs/x', 'Alice is the CEO of [Acme](companies/acme).', {}, 'concept', allowAllResolver);
     expect(employer.find(c => c.targetSlug === 'companies/acme')!.linkType).toBe('works_at');
+  });
+
+  test('does not emit URL-derived page or bare-path candidates', async () => {
+    for (const content of [
+      '[[https://audio.inleague.io/audio/file.mp3]]',
+      '[Audio](//audio.inleague.io/audio/file.mp3)',
+    ]) {
+      const { candidates } = await extractPageLinks(
+        'docs/x', content, {}, 'concept', nullResolver,
+        { skipFrontmatter: true, lineGrammar: { enabled: false } },
+      );
+      expect(candidates).toEqual([]);
+    }
+  });
+
+  test('keeps root-relative markdown page candidates', async () => {
+    const { candidates } = await extractPageLinks(
+      'meetings/example', '[Alice](/people/alice-example.md)', {}, 'meeting', nullResolver,
+      { skipFrontmatter: true, lineGrammar: { enabled: false } },
+    );
+    expect(candidates.some(candidate => candidate.targetSlug === 'people/alice-example')).toBe(true);
   });
 
   test('#2011: excerpt window slicing a non-BMP char yields well-formed context', async () => {

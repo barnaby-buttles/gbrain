@@ -943,6 +943,14 @@ class ProposeTakesPhase extends BaseCyclePhase {
     const failures = await ProposeTakesFailures.load(engine, listed.map(page => page.source_id ?? scope.sourceId ?? 'default'), promptVersion);
     const pages = failures.order(listed, page => [page.source_id ?? scope.sourceId ?? 'default', contentHash(page.compiled_truth ?? '')]);
 
+    // Local patch (PR #2907, not upstream): early termination — bail after
+    // CONSECUTIVE_EMPTY_LIMIT pages return zero proposals. Safety net on top
+    // of the upstream tombstone cache (#2106): on a COLD cycle (no tombstones
+    // yet), factual/reference pages with no gradeable claims would otherwise
+    // burn an LLM call each before the tombstone is written.
+    const CONSECUTIVE_EMPTY_LIMIT = 10;
+    let consecutiveEmpty = 0;
+
     if (opts.reporter) {
       opts.reporter.start('propose_takes.pages' as never, pages.length);
     }
@@ -1134,6 +1142,21 @@ class ProposeTakesPhase extends BaseCyclePhase {
           ],
         );
         result.tombstones_written += 1;
+      }
+
+      // Local patch (PR #2907, not upstream): early termination — track
+      // consecutive empty extractions and bail once the limit is hit.
+      // Resets on any page that yields proposals.
+      if (proposals.length === 0) {
+        consecutiveEmpty += 1;
+        if (consecutiveEmpty >= CONSECUTIVE_EMPTY_LIMIT) {
+          result.warnings.push(
+            `early termination: ${CONSECUTIVE_EMPTY_LIMIT} consecutive pages with no gradeable claims (scanned ${result.pages_scanned}/${pages.length})`,
+          );
+          break;
+        }
+      } else {
+        consecutiveEmpty = 0;
       }
     }
 

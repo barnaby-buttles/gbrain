@@ -225,6 +225,8 @@ const PUBLIC_DETAIL_KEYS: ReadonlySet<string> = new Set(['origin', 'sqlstate', '
 
 export function publicFailureDetail(detail: unknown): Record<string, unknown> | undefined {
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+  // Legacy runtime_failure receipts stay fully private even under the broader origin allow-list.
+  if ((detail as { origin?: unknown }).origin === 'runtime_failure') return undefined;
   // #5929: an allow-list, so a key added to a stored detail is owner-only unless it is listed here.
   // #6513: `reason` is public only as a member of the closed enum, whatever a stored detail holds under that key.
   const rest = Object.fromEntries(Object.entries(detail).filter(([key, value]) => PUBLIC_DETAIL_KEYS.has(key)

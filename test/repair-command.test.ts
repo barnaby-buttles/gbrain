@@ -15,10 +15,11 @@ import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
-import { resolveRepairScope, runRepair } from '../src/core/repair/core.ts';
+import { repairRequestId, resolveRepairScope, runRepair } from '../src/core/repair/core.ts';
 import { timelineRepair } from '../src/core/repair/timeline.ts';
 import { runRepairCommand } from '../src/commands/repair.ts';
 import { timelineHistoryCheck } from '../src/commands/doctor/checks/timeline-history.ts';
+import { serializePageToMarkdown } from '../src/core/markdown.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { testBackends } from './helpers/test-backends.ts';
@@ -89,6 +90,44 @@ const markedPages = async (engine: BrainEngine, sourceId: string) => (await engi
   `SELECT slug FROM pages WHERE source_id=$1 AND timeline LIKE '%gbrain:materialized%' ORDER BY slug`, [sourceId])).map(r => r.slug);
 
 describe('gbrain repair timeline', () => {
+  test('repairRequestId retries only the exact committed skipped no-op page write', async () => {
+    await brain(async (engine, [source]) => {
+      const ctx = ctxFor(engine, source);
+      const seedReceipt = async (slug: string, outcome: Record<string, unknown>, operation = 'put_page') => {
+        await submitPageMutation(ctx, { operation: 'put_page', params: {
+          slug, source_id: source, content: page(`Body of ${slug}.`), request_id: randomUUID(),
+        } });
+        const snapshot = (await engine.readPageSnapshot(slug, { sourceId: source }))!;
+        const revision = snapshot.revision;
+        const requestId = await repairRequestId(ctx, 'timeline', { source_id: source, slug }, revision);
+        await submitPageMutation(ctx, { operation: 'put_page', params: { slug, source_id: source,
+          content: serializePageToMarkdown(snapshot.page, snapshot.tags), expected_revision: revision, request_id: requestId } });
+        const current = (await engine.readPageSnapshot(slug, { sourceId: source }))!;
+        await engine.executeRaw('UPDATE persistence_requests SET operation=$1,outcome=$2::jsonb WHERE request_id=$3::uuid',
+          [operation, JSON.stringify(outcome), requestId]);
+        return { slug, requestId, revision, currentRevision: current.revision };
+      };
+
+      const skipped = await seedReceipt('notes/skipped', { status: 'skipped', noop: true });
+      const retryId = await repairRequestId(ctx, 'timeline', { source_id: source, slug: skipped.slug }, skipped.revision);
+      expect(retryId).not.toBe(skipped.requestId);
+      const current = (await engine.readPageSnapshot(skipped.slug, { sourceId: source }))!;
+      await submitPageMutation(ctx, { operation: 'put_page', params: {
+        slug: skipped.slug, source_id: source, content: serializePageToMarkdown(current.page, current.tags),
+        expected_revision: skipped.currentRevision, request_id: retryId,
+      } });
+      await engine.executeRaw('UPDATE persistence_requests SET outcome=$1::jsonb WHERE request_id=$2::uuid',
+        [JSON.stringify({ status: 'created_or_updated', noop: false }), retryId]);
+      expect(await repairRequestId(ctx, 'timeline', { source_id: source, slug: skipped.slug }, skipped.revision)).toBe(retryId);
+
+      const ambiguous = await seedReceipt('notes/skipped-without-noop', { status: 'skipped' });
+      expect(await repairRequestId(ctx, 'timeline', { source_id: source, slug: ambiguous.slug }, ambiguous.revision)).toBe(ambiguous.requestId);
+
+      const otherOperation = await seedReceipt('notes/non-page-skip', { status: 'skipped', noop: true }, 'add_timeline_entry');
+      expect(await repairRequestId(ctx, 'timeline', { source_id: source, slug: otherOperation.slug }, otherOperation.revision)).toBe(otherOperation.requestId);
+    });
+  }, 120_000);
+
   test('previews without writing, applies, and a second apply changes nothing', async () => {
     await brain(async (engine, [source]) => {
       await pageWithHistory(engine, source, 'notes/a');

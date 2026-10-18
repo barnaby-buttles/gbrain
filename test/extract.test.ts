@@ -20,6 +20,13 @@ describe('extractMarkdownLinks', () => {
     expect(links).toHaveLength(0);
   });
 
+  it('skips protocol-relative URLs and slash-leading wikilinks but keeps root-relative page paths', () => {
+    const links = extractMarkdownLinks(
+      '[audio](//audio.inleague.io/audio/file.md) [[/concepts/page]] [Alice](/people/alice-example.md)',
+    );
+    expect(links).toEqual([{ name: 'Alice', relTarget: '/people/alice-example.md' }]);
+  });
+
   it('handles links with no matches', () => {
     const content = 'No links here.';
     expect(extractMarkdownLinks(content)).toHaveLength(0);

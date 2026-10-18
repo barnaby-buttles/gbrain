@@ -482,9 +482,13 @@ export function entityRefPasses(content: string): EntityRef[][] {
   const qualPattern = new RegExp(QUALIFIED_WIKILINK_RE.source, QUALIFIED_WIKILINK_RE.flags);
   refs = passes[2];
   while ((match = qualPattern.exec(stripped)) !== null) {
+    // Check the complete span before splitting `https://...` into sourceId
+    // `https` and a path beginning with `//`; the latter no longer contains
+    // the scheme marker checked below.
+    if (match[0].includes('://')) continue;
     const sourceId = match[1];
     let slug = stripEscapedPipeTail(match[2].trim());
-    if (!slug) continue;
+    if (!slug || slug.startsWith('/')) continue;
     if (slug.includes('://')) continue;
     if (slug.endsWith('.md')) slug = slug.slice(0, -3);
     const displayName = (match[3] || slug).trim();
@@ -533,7 +537,7 @@ export function entityRefPasses(content: string): EntityRef[][] {
   refs = passes[4];
   while ((match = genericPattern.exec(genericMasked)) !== null) {
     let slug = stripEscapedPipeTail(match[1].trim());
-    if (!slug) continue;
+    if (!slug || slug.startsWith('/')) continue;
     if (slug.includes('://')) continue;
     if (slug.includes(':')) continue; // qualified-syntax token; 2a owns these
     if (slug.endsWith('.md')) slug = slug.slice(0, -3);
@@ -1012,7 +1016,11 @@ export async function extractBodyLinks(slug: string, content: string, pageType: 
   // `llm-wiki/entities` as a bare-path match — a spurious edge to the parent
   // page whenever that page exists.
   const strippedContent = stripCodeBlocks(content)
-    .replace(/\[\[[^\]]*\]\]/g, (s) => ' '.repeat(s.length));
+    .replace(/\[\[[^\]]*\]\]/g, (s) => ' '.repeat(s.length))
+    // Mask absolute and protocol-relative URLs before scanning prose for
+    // `dir/path` slugs (`//host.example/audio/file` otherwise yields `io/audio/file`).
+    // Equal-length spaces preserve the offsets used by excerpt().
+    .replace(/(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s)\]>]+/gi, (s) => ' '.repeat(s.length));
   const bareRe = new RegExp(
     `\\b(${ANY_DIR_SEGMENT}\\/[a-z0-9][a-z0-9/-]*[a-z0-9])\\b`,
     'g',
@@ -1116,7 +1124,7 @@ export function extractMarkdownLinks(content: string, positions = false): { name
   let match;
   while ((match = mdPattern.exec(content)) !== null) {
     let target = match[2];
-    if (target.includes('://')) continue;
+    if (target.startsWith('//') || target.includes('://')) continue;
     // Obsidian's useMarkdownLinks mode percent-encodes link targets
     // (`[Alice](People/Alice%20Chen.md)`). Decode before resolution; a
     // malformed escape keeps the raw text rather than throwing.
@@ -1129,7 +1137,7 @@ export function extractMarkdownLinks(content: string, positions = false): { name
   const wikiPattern = /\[\[([^|\]]+?)(?:\|[^\]]*?)?\]\]/g;
   while ((match = wikiPattern.exec(content)) !== null) {
     const rawPath = match[1].trim();
-    if (rawPath.includes('://')) continue;
+    if (rawPath.startsWith('/') || rawPath.includes('://')) continue;
     const hashIdx = rawPath.indexOf('#');
     const pagePath = hashIdx >= 0 ? rawPath.slice(0, hashIdx) : rawPath;
     if (!pagePath) continue;

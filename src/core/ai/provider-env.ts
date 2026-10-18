@@ -52,6 +52,9 @@ export const CONFIG_API_KEY_ENV = [
   // so a config.json-only setup failed every embed from keyless shells
   // (launchd/cron/MCP) while `config show` looked complete.
   ['azure_openai_api_key', 'AZURE_OPENAI_API_KEY'],
+  ['opencode_go_api_key', 'OPENCODE_GO_API_KEY'],
+  ['commandcode_api_key', 'COMMANDCODE_API_KEY'],
+  ['ollama_api_key', 'OLLAMA_API_KEY'],
 ] as const satisfies ReadonlyArray<readonly [keyof GBrainConfig, string]>;
 
 const realEnv = (env: Record<string, string | undefined>, name: string): string | undefined =>

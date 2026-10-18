@@ -266,6 +266,30 @@ export const CANONICAL_PRICING: Record<string, ModelPricing> = {
   'openrouter:deepseek/deepseek-v4-flash-0731': { input: 0.0152, output: 1.28 },
   'openrouter:qwen/qwen3.7-flash':              { input: 0.03,  output: 0.13 },
   'openrouter:qwen/qwen3.6-plus':               { input: 0.325, output: 1.95 },
+
+  // ── OpenCode Go (subscription proxy — per-token rates match upstream) ───
+  'opencode-go:deepseek-v4-flash':         { input:  0.14, output:  0.28 },
+  // V4.1 Flash is billed at the Flash price (DeepSeek's 2026-09-10 card; the
+  // Go relay follows it). Without this key the household's current default
+  // model resolved as unpriced, so budget gates saw $0. Cache reads are not
+  // modelled in this table.
+  'opencode-go:deepseek-v4.1-flash':       { input:  0.14, output:  0.28 },
+  'opencode-go:deepseek-v4-pro':           { input:  0.27, output:  1.10 },
+  'opencode-go:mimo-v2.5':                { input:  0.14, output:  0.28 },
+  'opencode-go:mimo-v2.5-pro':            { input:  0.27, output:  1.10 },
+  'opencode-go:qwen3.5-plus':             { input:  0.20, output:  0.60 },
+  'opencode-go:qwen3.6-plus':             { input:  0.20, output:  0.60 },
+  'opencode-go:qwen3.7-plus':             { input:  0.20, output:  0.60 },
+  'opencode-go:qwen3.7-max':              { input:  0.40, output:  1.20 },
+  'opencode-go:grok-4.5':                 { input:  0.50, output:  2.50 },
+
+  // ── CommandCode (provider API — per-token rates match upstream) ──────────
+  'commandcode:deepseek/deepseek-v4-flash': { input: 0.14, output: 0.28 },
+  'commandcode:deepseek/deepseek-v4-pro':   { input: 0.27, output: 1.10 },
+
+  // ── Ollama Cloud (hosted — off-peak rates, verified 2026-09-09) ──────────
+  'ollama-cloud:deepseek-v4-flash:0731':    { input: 0.22, output: 0.66 },
+  'ollama-cloud:deepseek-v4-pro:0813':      { input: 0.66, output: 1.98 },
 };
 
 /**

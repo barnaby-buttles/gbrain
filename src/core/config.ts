@@ -134,7 +134,28 @@ export interface GBrainConfig {
   azure_openai_endpoint?: string;
   azure_openai_deployment?: string;
   azure_openai_use_entra?: string;
-
+  /**
+   * OpenCode Go API key. File-plane slot so `gbrain config set
+   * opencode_go_api_key X` (or config.json) reaches the opencode-go recipe:
+   * file plane → loadConfig env merge → buildGatewayConfig env dict → recipe
+   * reads OPENCODE_GO_API_KEY.
+   */
+  opencode_go_api_key?: string;
+  /**
+   * CommandCode API key. File-plane slot so `gbrain config set
+   * commandcode_api_key X` (or config.json) reaches the commandcode recipe:
+   * file plane → loadConfig env merge → buildGatewayConfig env dict → recipe
+   * reads COMMANDCODE_API_KEY.
+   */
+  commandcode_api_key?: string;
+  /**
+   * Ollama Cloud API key. File-plane slot so `gbrain config set
+   * ollama_api_key X` (or config.json) reaches the ollama-cloud recipe:
+   * file plane → loadConfig env merge → buildGatewayConfig env dict → recipe
+   * reads OLLAMA_API_KEY. Needed for daemon/MCP contexts (jobs supervisor,
+   * workers, `gbrain serve`) that don't inherit the shell env.
+   */
+  ollama_api_key?: string;
   embedding_model?: string;
   embedding_dimensions?: number;
   /**
@@ -741,6 +762,9 @@ export function loadConfig(): GBrainConfig | null {
     ...(process.env.OPENAI_API_KEY ? { openai_api_key: process.env.OPENAI_API_KEY } : {}),
     ...(process.env.ANTHROPIC_API_KEY ? { anthropic_api_key: process.env.ANTHROPIC_API_KEY } : {}),
     ...(process.env.OPENROUTER_API_KEY ? { openrouter_api_key: process.env.OPENROUTER_API_KEY } : {}),
+    ...(process.env.OPENCODE_GO_API_KEY ? { opencode_go_api_key: process.env.OPENCODE_GO_API_KEY } : {}),
+    ...(process.env.COMMANDCODE_API_KEY ? { commandcode_api_key: process.env.COMMANDCODE_API_KEY } : {}),
+    ...(process.env.OLLAMA_API_KEY ? { ollama_api_key: process.env.OLLAMA_API_KEY } : {}),
     ...(process.env.GBRAIN_EMBEDDING_MODEL ? { embedding_model: process.env.GBRAIN_EMBEDDING_MODEL } : {}),
     ...(process.env.GBRAIN_EMBEDDING_DIMENSIONS ? { embedding_dimensions: parseInt(process.env.GBRAIN_EMBEDDING_DIMENSIONS, 10) } : {}),
     ...(process.env.GBRAIN_EXPANSION_MODEL ? { expansion_model: process.env.GBRAIN_EXPANSION_MODEL } : {}),

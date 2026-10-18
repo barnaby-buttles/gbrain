@@ -5,7 +5,10 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import { operations, type OperationContext } from '../src/core/operations.ts';
 import { withVerifiedLocalRegistration, type LocalGrant, type LocalRegistration } from '../src/core/persistence/identity.ts';
 import { submissionAuthority } from '../src/core/persistence/authority.ts';
-import { admitWrite, getWriteRequest } from '../src/core/persistence/journal.ts';
+import { admitWrite, getWriteRequest, receiptFor } from '../src/core/persistence/journal.ts';
+import { finishUnpublishedFailure } from '../src/core/persistence/coordinator.ts';
+import { publicFailureDetail } from '../src/core/persistence/publication-failure.ts';
+import { publicWriteReceipt } from '../src/core/persistence/types.ts';
 import { sha256 } from '../src/core/persistence/digest.ts';
 
 const RECEIPTS = ['get_write_request', 'list_write_requests', 'cancel_write_request'];
@@ -16,8 +19,8 @@ let owner: LocalRegistration;
 let foreign: LocalRegistration;
 let sequence = 0;
 const grant = (): LocalGrant => ({ sourceIds: ['*'], operations: ['put_page', ...RECEIPTS], scopes: ['read', 'write'], slugPrefixes: null });
-const context = (target: BrainEngine = engine, sourceId = source): OperationContext => ({
-  engine: target, config: { engine: 'pglite' }, remote: false, sourceId, dryRun: false,
+const context = (target: BrainEngine = engine, sourceId = source, remote = false): OperationContext => ({
+  engine: target, config: { engine: 'pglite' }, remote, sourceId, dryRun: false,
   logger: { info() {}, warn() {}, error() {} },
 });
 
@@ -28,12 +31,12 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => { await engine?.disconnect(); });
 
-async function registration(): Promise<LocalRegistration> {
-  const local: LocalRegistration = { id: randomUUID(), credential: randomBytes(32).toString('hex'), lane: 'cli' };
+const registration = async (lane: 'cli' | 'stdio' = 'cli'): Promise<LocalRegistration> => {
+  const local: LocalRegistration = { id: randomUUID(), credential: randomBytes(32).toString('hex'), lane };
   await engine.executeRaw('INSERT INTO persistence_local_writers(id,lane,credential_hash,grant_ceiling) VALUES($1,$2,$3,$4::jsonb)',
     [local.id, local.lane, sha256(local.credential), JSON.stringify(grant())]);
   return local;
-}
+};
 beforeEach(async () => {
   source = `receipt-op-${++sequence}`;
   otherSource = `receipt-other-${sequence}`;
@@ -48,11 +51,17 @@ async function setGrant(local: LocalRegistration, patch: Partial<LocalGrant>) {
 async function accept(local = owner, slug = 'allowed/page', sourceId = source, requestId = randomUUID()) {
   return withVerifiedLocalRegistration(engine, local, async () => {
     const [s] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation FROM sources WHERE id=$1', [sourceId]);
-    const authority = await submissionAuthority(context(engine, sourceId), 'put_page', sourceId, s.incarnation, slug);
+    const ctx = context(engine, sourceId, local.lane === 'stdio');
+    const authority = await submissionAuthority(ctx, 'put_page', sourceId, s.incarnation, slug);
     return admitWrite(engine, { principal: authority.principal, authority, operation: 'put_page', sourceId,
       sourceIncarnation: s.incarnation, slug, requestId,
       callerIntent: { content: 'PRIVATE_INPUT_MARKER' }, intent: { content: 'PRIVATE_INPUT_MARKER' } });
   });
+}
+async function failAccepted(row: Awaited<ReturnType<typeof accept>>, error: unknown, stage: 'preparation' | 'publication' | 'after_file_publication') {
+  const executionToken = randomUUID();
+  await engine.executeRaw("UPDATE persistence_requests SET state='running',execution_token=$2::uuid WHERE id=$1::uuid", [row.id, executionToken]);
+  return finishUnpublishedFailure(engine, { ...row, state: 'running', execution_token: executionToken }, error, stage);
 }
 async function call(name: string, params: Record<string, unknown>, local = owner, ctx = context()): Promise<any> {
   const op = operations.find(operation => operation.name === name)!;
@@ -145,6 +154,63 @@ describe('own-principal write receipt operations', () => {
     expect(receipt).toMatchObject({ request_id: row.request_id, state: 'queued', operation: 'put_page', source_id: source, slug: 'allowed/page', write_error: 'revision_conflict' });
     expect(JSON.stringify(receipt)).not.toContain('PRIVATE_');
     for (const key of ['principal_id', 'authority', 'intent', 'execution_token', 'recovery', 'digest']) expect(receipt).not.toHaveProperty(key);
+  });
+
+  test('unexpected publication details stay bounded to owner-side storage and are redacted in every receipt', async () => {
+    const row = await accept();
+    const localError = Object.assign(new TypeError('PRIVATE_MESSAGE_MARKER /private/pages/allowed/page.md'), {
+      code: 'EACCES', name: 'PRIVATE_NAME_MARKER', stack: 'PRIVATE_STACK_MARKER /private/stack.ts',
+    });
+    const failed = await failAccepted(row, localError, 'preparation');
+    expect(failed.state).toBe('failed');
+    expect(failed.error_code).toBe('storage_error');
+    expect(failed.error_detail).toMatchObject({ origin: 'owner_exception', error_class: 'TypeError', errno: 'EACCES', stage: 'preparation' });
+    expect(failed.error_message).not.toContain('PRIVATE_');
+    expect(JSON.stringify(failed.error_detail)).not.toContain('/private/');
+    const stored = await getWriteRequest(engine, row.authority.principal, row.request_id);
+    expect(stored?.error_detail).toMatchObject({ origin: 'owner_exception', error_class: 'TypeError', errno: 'EACCES' });
+
+    const localReceipt = await call('get_write_request', { request_id: row.request_id });
+    expect(localReceipt).not.toHaveProperty('write_error_detail');
+    expect(localReceipt).not.toHaveProperty('owner_runtime_failure');
+    for (const marker of ['PRIVATE_MESSAGE_MARKER', 'PRIVATE_NAME_MARKER', 'PRIVATE_STACK_MARKER', '/private/']) {
+      expect(JSON.stringify(localReceipt)).not.toContain(marker);
+    }
+
+    const publicReceipt = receiptFor(failed) as Record<string, unknown>;
+    expect(publicReceipt.write_error_detail).toEqual({ origin: 'owner_exception', stage: 'preparation' });
+    expect(publicFailureDetail(failed.error_detail)).toEqual({ origin: 'owner_exception', stage: 'preparation' });
+    expect(publicWriteReceipt(publicReceipt as never)).not.toHaveProperty('owner_runtime_failure');
+    const listed = await call('list_write_requests', { limit: 100 });
+    const listedFailure = listed.requests.find((entry: any) => entry.request_id === row.request_id);
+    expect(listedFailure).not.toHaveProperty('owner_runtime_failure');
+    expect(listedFailure).not.toHaveProperty('write_error_detail');
+    expect(JSON.stringify(listedFailure)).not.toContain('PRIVATE_STACK_MARKER');
+    const cancelled = await call('cancel_write_request', { request_id: row.request_id });
+    expect(cancelled).not.toHaveProperty('owner_runtime_failure');
+
+    const postgresRow = await accept(owner, 'allowed/postgres-failure');
+    const postgresFailure = await failAccepted(postgresRow, Object.assign(new Error('PRIVATE_SQL_MESSAGE'), { code: '23505' }), 'publication');
+    expect(postgresFailure.error_detail).toMatchObject({ origin: 'owner_exception', error_class: 'Error', errno: '23505', stage: 'publication' });
+    expect(JSON.stringify(postgresFailure.error_detail)).not.toContain('PRIVATE_SQL_MESSAGE');
+    expect(JSON.stringify(await call('get_write_request', { request_id: postgresRow.request_id }))).not.toContain('PRIVATE_SQL_MESSAGE');
+
+    const remoteWriter = await registration('stdio');
+    const remoteRow = await accept(remoteWriter, 'allowed/remote');
+    const remoteError = Object.assign(new Error('PRIVATE_REMOTE_MESSAGE /private/remote/page.md'), {
+      code: '/private/raw-code', stack: 'Error: PRIVATE_REMOTE_MESSAGE\n    at remote (/private/remote/page.ts:1:1)',
+    });
+    const remoteFailed = await failAccepted(remoteRow, remoteError, 'publication');
+    expect(remoteFailed.error_detail).toMatchObject({ origin: 'owner_exception', error_class: 'Error', stage: 'publication' });
+    expect(remoteFailed.error_detail).not.toHaveProperty('errno');
+    await expect(call('get_write_request', { request_id: remoteRow.request_id })).rejects.toMatchObject({ code: 'not_found' });
+    const remoteReceipt = await call('get_write_request', { request_id: remoteRow.request_id }, remoteWriter, context(engine, source, true));
+    expect(remoteReceipt).not.toHaveProperty('write_error_detail');
+    expect(remoteReceipt).not.toHaveProperty('owner_build');
+    expect(JSON.stringify(remoteReceipt)).not.toContain('PRIVATE_REMOTE_MESSAGE');
+    expect(JSON.stringify(remoteReceipt)).not.toContain('/private/');
+
+    expect(publicFailureDetail({ origin: 'runtime_failure', error_class: 'TypeError', error_code: 'EACCES', stage: 'publication' })).toBeUndefined();
   });
 
   test('foreign and missing UUIDs have the same get/cancel not_found envelope', async () => {
